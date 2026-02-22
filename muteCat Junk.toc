@@ -2,8 +2,9 @@
 ## Title: muteCat Junk
 ## Notes: Auto-sells junk and low level gear, auto-repairs, optimized for Midnight.
 ## Author: Ben (muteCat)
-## Version: 1.1.0
+## Version: 1.1.2
 ## IconTexture: Interface\AddOns\muteCat Junk\icon.png
 ## OptionalDeps: Baganator
 
+item_ids.lua
 core.lua
