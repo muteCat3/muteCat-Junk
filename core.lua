@@ -2,7 +2,7 @@ local addonName, addonTable = ...
 
 -----------------------------------------------------------
 -- Core Variables & Event Frame
--------------------------------------------
+-----------------------------------------------------------
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("MERCHANT_SHOW")
 frame:RegisterEvent("MERCHANT_CLOSED")
@@ -34,7 +34,7 @@ local nativeWarbound = _G.ITEM_BIND_TO_WAR_ACCOUNT and lower(_G.ITEM_BIND_TO_WAR
 local nativeBoA = _G.ITEM_BIND_TO_ACCOUNT and lower(_G.ITEM_BIND_TO_ACCOUNT) or nil
 local nativeBoN = _G.ITEM_BIND_TO_BNETACCOUNT and lower(_G.ITEM_BIND_TO_BNETACCOUNT) or nil
 local nativeItemLevelPrefix = _G.ITEM_LEVEL and lower(_G.ITEM_LEVEL) or "item level"
-local nativeCraftingReagent = _G.PROFESSIONS_USED_IN_COOKING and lower(_G.PROFESSIONS_USED_IN_COOKING) or nil
+local nativeCraftingReagent = _G.CRAFTING_REAGENT and lower(_G.CRAFTING_REAGENT) or "handwerksreagenz"
 
 local scanningTip = CreateFrame("GameTooltip", "muteCatJunkScanningTip", nil, "GameTooltipTemplate")
 scanningTip:SetOwner(WorldFrame, "ANCHOR_NONE")
@@ -168,16 +168,15 @@ local function IsCraftingReagentInTooltip(bag, slot)
         if nativeCraftingReagent and find(rtxt, nativeCraftingReagent, 1, true) then
             return true
         end
+        -- English fallbacks
         if find(txt, "crafting reagent", 1, true) or find(txt, "classic crafting reagent", 1, true) then
             return true
         end
-        if find(txt, "handwerksreagenz", 1, true) then
+        -- German fallbacks & variations
+        if find(txt, "handwerksreagenz", 1, true) or find(txt, "handwerksmaterial", 1, true) or find(txt, "handwerksmaterialien", 1, true) or find(txt, "reagenz", 1, true) then
             return true
         end
-        if find(rtxt, "crafting reagent", 1, true) or find(rtxt, "classic crafting reagent", 1, true) then
-            return true
-        end
-        if find(rtxt, "handwerksreagenz", 1, true) then
+        if find(rtxt, "handwerksreagenz", 1, true) or find(rtxt, "handwerksmaterial", 1, true) or find(rtxt, "handwerksmaterialien", 1, true) or find(rtxt, "reagenz", 1, true) then
             return true
         end
     end
@@ -194,10 +193,7 @@ local function IsCraftingMat(bag, slot, classID, isCraftingReagent, subTypeText)
         if nativeCraftingReagent and find(subType, nativeCraftingReagent, 1, true) then
             hasReagentSubType = true
         end
-        if find(subType, "reagent", 1, true) or find(subType, "reagenz", 1, true) then
-            hasReagentSubType = true
-        end
-        if find(subType, "handwerksreagenz", 1, true) then
+        if find(subType, "reagent", 1, true) or find(subType, "reagenz", 1, true) or find(subType, "handwerksmaterial", 1, true) then
             hasReagentSubType = true
         end
     end
@@ -219,26 +215,51 @@ local function ParseTooltip(bag, slot)
     
     if t and t.lines then
         for _, l in ipairs(t.lines) do
-            local txt = SafeLowerText(l.leftText)
+            local txt = SafeLowerText(l.leftText or "")
             
-            -- Detect bindings using native strings (with english fallback).
-            if nativeWarbound and find(txt, nativeWarbound, 1, true) then bound = true end
-            if nativeBoA and find(txt, nativeBoA, 1, true) then bound = true end
-            if nativeBoN and find(txt, nativeBoN, 1, true) then bound = true end
-            if find(txt, "warbound", 1, true) or find(txt, "warband", 1, true) or find(txt, "account", 1, true) then
+            -- Detect bindings using native strings (with english/german fallbacks).
+            if (nativeWarbound and find(txt, nativeWarbound, 1, true)) or 
+               (nativeBoA and find(txt, nativeBoA, 1, true)) or 
+               (nativeBoN and find(txt, nativeBoN, 1, true)) or
+               find(txt, "warbound", 1, true) or 
+               find(txt, "warband", 1, true) or 
+               find(txt, "account", 1, true) or
+               find(txt, "kriegsmeute", 1, true) or
+               find(txt, "kriegsgebunden", 1, true) then
                 bound = true
             end
 
-            if nativeSoulbound and find(txt, nativeSoulbound, 1, true) then bind = true end
-            if find(txt, "soulbound", 1, true) then bind = true end
+            if (nativeSoulbound and find(txt, nativeSoulbound, 1, true)) or 
+               find(txt, "soulbound", 1, true) or
+               find(txt, "seelengebunden", 1, true) or
+               (find(txt, "gebunden", 1, true) and not bound) then 
+                bind = true 
+            end
             
-            -- Extract item level from native token or english fallback.
-            local foundLvl = txt:match(nativeItemLevelPrefix .. "%s*(%d+)") or txt:match("item level%s*(%d+)")
+            -- Extract item level from native token or common patterns.
+            -- German pattern: "Gegenstandsstufe 10"
+            local foundLvl = txt:match(nativeItemLevelPrefix .. "%s*(%d+)") or 
+                             txt:match("item level%s*(%d+)") or
+                             txt:match("gegenstandsstufe%s*(%d+)")
             if foundLvl then lvl = tonumber(foundLvl) end
         end
     end
     
     return bind, bound, lvl
+end
+
+local evalHistory = {}
+local MAX_HISTORY = 20
+
+local function LogDecision(link, result, reason)
+    table.insert(evalHistory, 1, {
+        link = link or "Unknown",
+        result = result and "|cffff5555Junk|r" or "|cff55ff55Keep|r",
+        reason = reason or "Unknown"
+    })
+    if #evalHistory > MAX_HISTORY then
+        table.remove(evalHistory)
+    end
 end
 
 -----------------------------------------------------------
@@ -249,7 +270,10 @@ local function IsJunk(bag, slot)
     if not info or info.hasNoValue then return false end
     
     -- Exclude equipment sets
-    if C_Container.GetContainerItemEquipmentSetInfo(bag, slot) then return false end
+    if C_Container.GetContainerItemEquipmentSetInfo(bag, slot) then 
+        LogDecision(info.hyperlink, false, "Equipment Set")
+        return false 
+    end
     
     local loc = ItemLocation:CreateFromBagAndSlot(bag, slot)
     if not C_Item.DoesItemExist(loc) then return false end
@@ -266,14 +290,26 @@ local function IsJunk(bag, slot)
     local resolvedClassID = classID or instantClassID
     local resolvedRarity = rarity or info.quality
 
-    if resolvedRarity == 5 or resolvedRarity == 6 then return false end
+    if resolvedRarity == 5 or resolvedRarity == 6 then 
+        LogDecision(info.hyperlink, false, "Legendary/Artifact")
+        return false 
+    end
 
     -- Manual hard overrides.
-    if itemID and forceKeepItemIDs[itemID] then return false end
-    if itemID and forceSellItemIDs[itemID] then return true end
+    if itemID and forceKeepItemIDs[itemID] then 
+        LogDecision(info.hyperlink, false, "Force Keep List")
+        return false 
+    end
+    if itemID and forceSellItemIDs[itemID] then 
+        LogDecision(info.hyperlink, true, "Force Sell List")
+        return true 
+    end
     
     -- 1. True Gray Junk
-    if resolvedRarity == 0 then return true end
+    if resolvedRarity == 0 then 
+        LogDecision(info.hyperlink, true, "Quality: Gray")
+        return true 
+    end
 
     -- 2. Bound Gear Checks (Armor/Weapons/Profession Gear)
     if equipLoc and equipLoc ~= "" and (resolvedClassID == 2 or resolvedClassID == 4 or resolvedClassID == 19) then
@@ -282,45 +318,81 @@ local function IsJunk(bag, slot)
         if info.isBound then bind = true end
         
         -- BoE Gear is strictly kept
-        if not bind and not bound then return false end
+        if not bind and not bound then 
+            LogDecision(info.hyperlink, false, "BoE Gear")
+            return false 
+        end
         
         -- Special: Low requirement account gear
-        if bound and minLvl and minLvl < 90 then return true end
+        if bound and minLvl and minLvl < 90 then 
+            LogDecision(info.hyperlink, true, "Low-lvl Account Bound")
+            return true 
+        end
 
         -- Level Thresholds (Midnight Values)
-        -- TWW BiS is ~170 after squish. Midnight S1 starts at 230+.
         local pcallOk, cLvl = pcall(C_Item.GetCurrentItemLevel, loc)
         local lvl = tLvl or (pcallOk and cLvl) or baseLvl
         
         local pLvl = UnitLevel("player")
-        -- Sell old expansion gear when reaching Midnight levels (Squish-adjusted for 12.0)
-        -- TWW BiS is ~170 after squish. Midnight S1 starts at 230+.
-        if pLvl >= 80 and lvl < 80 then return true end -- Legacy junk
-        if pLvl >= 90 and lvl < 150 then return true end -- Old/Low TWW gear
-        if pLvl >= 100 and lvl < 200 then return true end -- Early Midnight bridge gear
+        if pLvl >= 80 and lvl < 80 then 
+            LogDecision(info.hyperlink, true, "Legacy Gear (Lvl < 80)")
+            return true 
+        end
+        if pLvl >= 90 and lvl < 150 then 
+            LogDecision(info.hyperlink, true, "Old TWW Gear (Lvl < 150)")
+            return true 
+        end
+        if pLvl >= 100 and lvl < 200 then 
+            LogDecision(info.hyperlink, true, "Bridge Gear (Lvl < 200)")
+            return true 
+        end
+        
+        LogDecision(info.hyperlink, false, "Relevant Bound Gear")
     end
 
     -- 3. Consumables: always keep listed Midnight consumables, otherwise profit based.
     if resolvedClassID == consumableClassID then
         if itemID and midnightConsumableKeepIDs[itemID] then
+            LogDecision(info.hyperlink, false, "Midnight Consumable")
             return false
         end
 
         local profit = GetProfitCopper(info.hyperlink, itemID, sellPrice, bag, slot)
-        return profit < MIN_PROFIT_COPPER
+        local isJunk = profit < MIN_PROFIT_COPPER
+        LogDecision(info.hyperlink, isJunk, isJunk and "Low Profit Consumable" or "Profitable Consumable")
+        return isJunk
     end
 
     -- 4. Crafting mats: keep Midnight mats, sell non-Midnight mats below profit threshold.
     if IsCraftingMat(bag, slot, resolvedClassID, isCraftingReagent, subType) then
         if itemID and midnightCraftingMatsByID[itemID] then
+            LogDecision(info.hyperlink, false, "Midnight Material")
             return false
         end
 
         local profit = GetProfitCopper(info.hyperlink, itemID, sellPrice, bag, slot)
-        return profit < MIN_PROFIT_COPPER
+        local isJunk = profit < MIN_PROFIT_COPPER
+        LogDecision(info.hyperlink, isJunk, isJunk and "Low Profit Material" or "Profitable Material")
+        return isJunk
     end
     
+    LogDecision(info.hyperlink, false, "Default Keep")
     return false
+end
+
+-----------------------------------------------------------
+-- Slash Commands
+-----------------------------------------------------------
+SLASH_MUTECATJUNK1 = "/mjlog"
+SlashCmdList["MUTECATJUNK"] = function()
+    print("|cffffaa00muteCat Junk Evaluation History:|r")
+    if #evalHistory == 0 then
+        print("Empty.")
+        return
+    end
+    for i, entry in ipairs(evalHistory) do
+        print(string.format("%d. %s: %s (%s)", i, entry.link, entry.result, entry.reason))
+    end
 end
 
 -----------------------------------------------------------
@@ -332,7 +404,6 @@ local function AutoRepair()
         if canRepair and cost > 0 then
             local guild = CanGuildBankRepair() and GetGuildBankMoney() >= cost and (GetGuildBankWithdrawMoney() == -1 or GetGuildBankWithdrawMoney() >= cost)
             RepairAllItems(guild)
-            print("|cffff00ffmuteCat Junk:|r Repair (" .. (guild and "Guild" or "Player") .. "): " .. GetCoinTextureString(cost))
         end
     end
 end
@@ -369,7 +440,6 @@ frame:SetScript("OnEvent", function(self, event)
         local function SellNext()
             if thisRunId ~= sellRunId or not isMerchantOpen or #queue == 0 then
                 if sold > 0 then
-                    print("|cffff00ffmuteCat Junk:|r Sold " .. sold .. " item(s) for " .. GetCoinTextureString(gold) .. ".")
                 end
                 return
             end

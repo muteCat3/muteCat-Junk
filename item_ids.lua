@@ -141,7 +141,7 @@ IDs.midnightConsumableKeepIDs = {
     [246376] = true,
     [246383] = true,
     [247673] = true,
-    [242415] = true,
+    [252415] = true,
     [253342] = true,
     [254677] = true,
     [255845] = true,
@@ -547,3 +547,4 @@ IDs.counts = {
     midnightConsumableKeepIDs = 237,
     midnightCraftingMatsByID = 294,
 }
+
